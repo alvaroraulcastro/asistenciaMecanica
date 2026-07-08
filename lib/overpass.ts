@@ -1,22 +1,10 @@
-import { haversineDistance } from "./distance";
 import type { Coordinates } from "./geolocation";
+import type { Place, PlaceType } from "./overpass-query";
 
-export interface Place {
-  id: number;
-  name: string;
-  lat: number;
-  lng: number;
-  address?: string;
-  phone?: string;
-  openingHours?: string;
-  distance: number;
-  tags: Record<string, string>;
-}
+export type { Place, PlaceType } from "./overpass-query";
 
-export type PlaceType = "talleres" | "gruas";
-
-const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
 const CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+const CLIENT_TIMEOUT_MS = 45_000;
 
 interface CacheEntry {
   data: Place[];
@@ -51,54 +39,6 @@ function setCache(key: string, data: Place[]): void {
   }
 }
 
-function buildQuery(type: PlaceType, lat: number, lng: number, radius: number): string {
-  const tag = type === "talleres" ? '"shop"="car_repair"' : '"amenity"="towing_service"';
-  return `
-    [out:json][timeout:10];
-    (
-      node[${tag}](around:${radius},${lat},${lng});
-    );
-    out body;
-  `.trim();
-}
-
-function parseOverpassResponse(json: OverpassJson, userCoords: Coordinates): Place[] {
-  return (json.elements || [])
-    .filter((el) => el.type === "node" && el.lat !== undefined && el.lon !== undefined)
-    .map((el) => ({
-      id: el.id,
-      name: el.tags?.name || el.tags?.["name:es"] || "Sin nombre",
-      lat: el.lat!,
-      lng: el.lon!,
-      address: buildAddress(el.tags || {}),
-      phone: el.tags?.phone || el.tags?.["contact:phone"],
-      openingHours: el.tags?.["opening_hours"],
-      distance: haversineDistance(userCoords.lat, userCoords.lng, el.lat!, el.lon!),
-      tags: el.tags || {},
-    }))
-    .sort((a, b) => a.distance - b.distance);
-}
-
-function buildAddress(tags: Record<string, string>): string | undefined {
-  const parts = [
-    tags["addr:street"],
-    tags["addr:housenumber"],
-    tags["addr:city"],
-    tags["addr:suburb"],
-  ].filter(Boolean);
-  return parts.length > 0 ? parts.join(", ") : undefined;
-}
-
-interface OverpassJson {
-  elements: Array<{
-    type: string;
-    id: number;
-    lat?: number;
-    lon?: number;
-    tags?: Record<string, string>;
-  }>;
-}
-
 export async function fetchPlaces(
   type: PlaceType,
   coords: Coordinates,
@@ -108,35 +48,43 @@ export async function fetchPlaces(
   const cached = getCached(cacheKey);
   if (cached) return cached;
 
-  const query = buildQuery(type, coords.lat, coords.lng, radius);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), CLIENT_TIMEOUT_MS);
 
   let response: Response;
   try {
-    response = await fetch(OVERPASS_URL, {
+    response = await fetch("/api/places", {
       method: "POST",
-      body: `data=${encodeURIComponent(query)}`,
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type,
+        lat: coords.lat,
+        lng: coords.lng,
+        radius,
+      }),
+      signal: controller.signal,
     });
-  } catch {
-    throw new Error("Error de red al consultar Overpass API. Verifique su conexión.");
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error("La búsqueda tardó demasiado. Pruebe reducir el radio o intente de nuevo.");
+    }
+    throw new Error("Error de red al consultar el servidor. Verifique su conexión.");
+  } finally {
+    clearTimeout(timeoutId);
   }
 
-  if (response.status === 429) {
-    throw new Error("Demasiadas consultas. Espere un momento e intente nuevamente.");
-  }
-
-  if (!response.ok) {
-    throw new Error("Error del servidor de mapas. Intente nuevamente.");
-  }
-
-  let json: OverpassJson;
+  let payload: { places?: Place[]; error?: string };
   try {
-    json = await response.json();
+    payload = await response.json();
   } catch {
     throw new Error("Error al procesar la respuesta del servidor.");
   }
 
-  const places = parseOverpassResponse(json, coords);
+  if (!response.ok) {
+    throw new Error(payload.error || "Error del servidor de mapas. Intente nuevamente.");
+  }
+
+  const places = payload.places ?? [];
   setCache(cacheKey, places);
   return places;
 }
