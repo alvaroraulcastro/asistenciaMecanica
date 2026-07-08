@@ -1,0 +1,24 @@
+{
+  "name": "Mecánico y Grúa más cercana",
+  "short_name": "Mecánico Cerca",
+  "description": "Encuentra talleres mecánicos y servicios de grúa cerca de ti",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#2563eb",
+  "orientation": "portrait",
+  "scope": "/",
+  "icons": [
+    {
+      "src": "/icons/icon-192x192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "/icons/icon-512x512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml"
+    }
+  ],
+  "categories": ["automotive", "utilities"]
+}
