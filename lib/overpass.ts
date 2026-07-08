@@ -8,6 +8,7 @@ export interface Place {
   lng: number;
   address?: string;
   phone?: string;
+  openingHours?: string;
   distance: number;
   tags: Record<string, string>;
 }
@@ -71,6 +72,7 @@ function parseOverpassResponse(json: OverpassJson, userCoords: Coordinates): Pla
       lng: el.lon!,
       address: buildAddress(el.tags || {}),
       phone: el.tags?.phone || el.tags?.["contact:phone"],
+      openingHours: el.tags?.["opening_hours"],
       distance: haversineDistance(userCoords.lat, userCoords.lng, el.lat!, el.lon!),
       tags: el.tags || {},
     }))
